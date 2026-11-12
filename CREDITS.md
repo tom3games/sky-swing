@@ -1,0 +1,32 @@
+# 音の出所
+
+- snd/thud1.mp3: 100 CC0 SFX #2 / rubberduck / CC0
+- snd/thud2.mp3: 100 CC0 SFX #2 / rubberduck / CC0
+- snd/thud3.mp3: 100 CC0 SFX #2 / rubberduck / CC0
+- snd/splat1.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
+- snd/splat2.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
+- snd/fall1.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
+- snd/fall2.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
+- snd/giggle.mp3: Group giggling / Nocturnal_Vanguard / CC0
+- snd/flap.mp3: Dragon Flap / VishwaJai / CC0
+- snd/amb_park.mp3: File:Réveil_des_oiseaux.ogg (5-23秒) / Joseph Sardin / CC0
+- snd/jgood.mp3: 85 Short music jingles / Kenney / CC0
+- snd/jmeh.mp3: 85 Short music jingles / Kenney / CC0
+- snd/jrare.mp3: 85 Short music jingles / Kenney / CC0
+- snd/jover.mp3: 85 Short music jingles / Kenney / CC0
+- snd/click.mp3: Interface Sounds / Kenney / CC0
+- snd/swish1.mp3: Swishes Sound Pack / artisticdude / CC0
+- snd/swish2.mp3: Swishes Sound Pack / artisticdude / CC0
+- snd/creak1.mp3: 50 RPG sound effects / Kenney / CC0
+- snd/creak2.mp3: 50 RPG sound effects / Kenney / CC0
+- snd/creak3.mp3: 50 RPG sound effects / Kenney / CC0
+- snd/clank1.mp3: 100 CC0 SFX #2 / rubberduck / CC0
+- snd/clank2.mp3: 100 CC0 SFX #2 / rubberduck / CC0
+- snd/clank3.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
+- snd/splash1.mp3: 100 CC0 SFX / rubberduck / CC0
+- snd/splash2.mp3: 100 CC0 SFX / rubberduck / CC0
+- snd/amb_wind.mp3: Wikimedia Commons「Howling wind」を継ぎ目なしループにした物 / CC0
+- snd/bgm_play.mp3: Recorder Jam / Of Far Different Nature / CC0
+- snd/bgm_title.mp3: Comedy Funny Background Song / Almitory / CC0（複数ライセンスから CC0 を選択）
+- snd/swish3.mp3: Swishes Sound Pack / artisticdude / CC0
+- snd/whistle.mp3: File:218318 splicesound referee-whistle-blow-gymnasium.wav（切り出し） / SpliceSound / CC0
