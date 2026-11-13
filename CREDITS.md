@@ -7,7 +7,6 @@
 - snd/splat2.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
 - snd/fall1.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
 - snd/fall2.mp3: 75 CC0 breaking / falling / hit sfx / rubberduck / CC0
-- snd/giggle.mp3: Group giggling / Nocturnal_Vanguard / CC0
 - snd/flap.mp3: Dragon Flap / VishwaJai / CC0
 - snd/amb_park.mp3: File:Réveil_des_oiseaux.ogg (5-23秒) / Joseph Sardin / CC0
 - snd/jgood.mp3: 85 Short music jingles / Kenney / CC0

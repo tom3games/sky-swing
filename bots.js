@@ -1,70 +1,82 @@
-// 天空ブランコの bot（sim・検証・?demo=1 で使う）。人の速さに寄せる: 反応の遅れ・狙いのずれ・漕ぐタイミングのぶれ
-// cfg: lag 気づいてから押すまでの秒 / jit タイミングのぶれ(秒) / pump 'good'|'bad'|'inv'|'none' / frac 下で立つ範囲（振れ幅の何割より内側で立つか）
-//      aim 先読みの手が鎖にこれだけ近ければ離す / minAmp 離すのを考え始める振れ幅 / tuck 空中で向きを合わせに丸まるか / hand 'air'（空中は押しっぱなし）|'late'（近づいてから押す）
+// 天空ブランコの bot（sim・検証・?demo=1 で使う）。v2: 左右の2ボタンだけ
+// 人の速さに寄せる: 揺れの向きに気づくまでの遅れ（lag）・タイミングのぶれ（jit）・空中で寄せるかどうか
+// cfg: pump 'good'（揺れている向きに押す）|'hold'（次の鎖の向きを押しっぱなし）|'bad'（でたらめ）|'inv'（逆に押す）
+//      lag 気づいてから押すまでの秒 / jit ぶれ(秒) / air 空中で次の鎖へ寄せる / airLag 空中で寄せ始めるまでの秒
 ;(function (root) {
 'use strict'
 function makeBot(PH, cfg, rnd = Math.random) {
-  const st = { amp: 0, curMax: 0, lastSgn: 0, relAt: -1, pressAt: -1, body: false, nextBody: -1, bodyWant: false, frac: cfg.frac || 0.5, handAirAt: -1, chooseTuck: false, tuckUntil: -1, decT: 0 }
+  const hist = []
+  const st = { want: 0, cur: 0, at: -1, decT: 0, rnd: 0, airDir: 0, airAt: -1, startAt: -1 }
   const jit = () => (rnd() + rnd() + rnd() - 1.5) * (cfg.jit || 0)
-  const lag = () => (cfg.lag || 0) * (0.7 + 0.6 * rnd())
+  const lag = () => (cfg.lag || 0) * (0.75 + 0.5 * rnd())
+  const out = d => ({ L: d < 0, R: d > 0 })
   return function (w) {
     const m = w.me, t = w.t
-    const out = { body: false, hand: false }
-    if (cfg.idle) return out
-    if (w.phase === 'ready') { if (st.pressAt < 0) st.pressAt = t + lag() + 0.3; out.hand = t >= st.pressAt; st.relAt = -1; st.amp = 0; st.curMax = 0; return out }
-    st.pressAt = -1
+    if (cfg.idle) return out(0)
+    hist.push({ t, om: m.mode === 'swing' ? m.h / (m.L * m.L) : 0, mode: m.mode })
+    while (hist.length > 2 && hist[1].t <= t - (cfg.lag || 0)) hist.shift()
+    const seen = hist[0]
+    if (w.phase === 'ready') {
+      if (st.startAt < 0) st.startAt = t + lag() + 0.3
+      if (t < st.startAt) return out(0)
+      const nx = w.swings[m.si + 1], s = w.swings[m.si]
+      return out(nx ? Math.sign(nx.x - s.x) || 1 : 1)
+    }
+    st.startAt = -1
     if (w.phase === 'swing') {
-      const om = m.h / (m.L * m.L)
-      const sg = Math.sign(om)
-      st.curMax = Math.max(st.curMax, Math.abs(m.th))
-      if (sg && st.lastSgn && sg !== st.lastSgn) { st.amp = st.curMax; st.curMax = 0; st.frac = (cfg.frac || 0.5) + jit() * 0.6 }
-      if (sg) st.lastSgn = sg
-      const A = Math.max(st.amp, st.curMax, 0.2)
-      // 漕ぐ: 決めた時から lag 遅れて体が動く
-      let want
-      if (cfg.pump === 'good') want = Math.abs(m.th) < st.frac * A
-      else if (cfg.pump === 'inv') want = Math.abs(m.th) > st.frac * A
-      else if (cfg.pump === 'bad') { if (t >= st.decT) { st.bodyWant = rnd() < 0.5; st.decT = t + 0.25 + rnd() * 0.6 } want = st.bodyWant }
-      else want = false
-      if (want !== st.bodyWant2) { st.bodyWant2 = want; st.nextBody = t + Math.max(0, lag() * 0.5 + jit()) }
-      if (st.nextBody >= 0 && t >= st.nextBody) { st.body = st.bodyWant2; st.nextBody = -1 }
-      out.body = st.body
-      // 離す: 先読みで次のブランコに手が届くと見えたら、lag 遅れて離す
-      out.hand = true
-      if (st.relAt < 0 && A > (cfg.minAmp || 0.5) && (w.tick % 2 === 0)) {
-        const j = m.si + 1
-        const path = PH.predict(w, 1.5, false)
-        const hit = PH.predictHit(w, j, path)
-        if (hit.d < (cfg.aim || 0.18) && hit.off < PH.P.upTol * 0.85) { st.relAt = t + (cfg.lead ? 0 : lag() * 0.35) + jit() * 0.5; st.chooseTuck = false }
-        else if (cfg.tuck) {
-          const p2 = PH.predict(w, 1.5, true), h2 = PH.predictHit(w, j, p2)
-          if (h2.d < (cfg.aim || 0.18) && h2.off < PH.P.upTol * 0.85) { st.relAt = t + lag() * 0.35 + jit() * 0.5; st.chooseTuck = true }
-        }
-        if (cfg.pump === 'bad' && st.relAt < 0 && A > 1.0 && rnd() < 0.02) st.relAt = t + lag()
-      }
-      if (st.relAt >= 0 && t >= st.relAt) { out.hand = false; st.relAt = -1; st.handAirAt = t + (cfg.hand === 'late' ? 0.25 + lag() : 0.08 + lag() * 0.3); st.tuckUntil = st.chooseTuck ? t + 0.6 : -1 }
-      return out
+      const s = w.swings[m.si], nx = w.swings[m.si + 1]
+      const toward = nx ? Math.sign(nx.x - s.x) || 1 : 1
+      let want = 0
+      if (cfg.pump === 'good') want = seen.mode === 'swing' ? Math.sign(seen.om) || toward : 0
+      else if (cfg.pump === 'inv') want = seen.mode === 'swing' ? -Math.sign(seen.om) : 0
+      else if (cfg.pump === 'hold') want = toward
+      else if (cfg.pump === 'bad') { if (t >= st.decT) { st.rnd = [-1, 0, 1][Math.floor(rnd() * 3)]; st.decT = t + 0.25 + rnd() * 0.7 } want = st.rnd }
+      if (want !== st.want) { st.want = want; st.at = t + Math.max(0, jit()) }
+      if (st.at >= 0 && t >= st.at) { st.cur = st.want; st.at = -1 }
+      st.airDir = 0; st.airAt = -1
+      return out(st.cur)
     }
     if (w.phase === 'air') {
-      out.hand = t >= st.handAirAt
-      out.body = t < st.tuckUntil
-      st.amp = 0; st.curMax = 0; st.lastSgn = 0
-      return out
+      st.cur = 0; st.want = 0
+      if (!cfg.air) return out(0)
+      if (st.airAt < 0) st.airAt = t + (cfg.airLag != null ? cfg.airLag : 0.3) * (0.8 + 0.4 * rnd())
+      if (t < st.airAt) return out(0)
+      // 今のまま飛んだら、手が次の鎖の左右どちらを通るか
+      const s = w.swings[m.relFrom + 1]
+      if (!s) return out(0)
+      if (w.tick % 6 === 0) {
+        const path = PH.predictAir(w, 0.9)
+        let best = 9, side = 0
+        for (let k = 0; k < path.length; k++) {
+          const tt = (k + 1) * PH.DT, th = s.th + s.om * tt
+          const p = path[k]
+          const u = (s.y - p.y) / s.C   // 手の高さが鎖のどこか（0 吊り元 / 1 座面）
+          if (u < 0 || u > 1.1) continue
+          const cx = s.x + s.C * u * Math.sin(th)
+          const d = Math.abs(cx - p.x)
+          if (d < best) { best = d; side = Math.sign(cx - p.x) }
+        }
+        st.airDir = best < 0.12 || best > 3 ? 0 : side
+      }
+      return out(st.airDir)
     }
-    return out
+    return out(0)
   }
 }
 const BOTS = {
-  // 上手い人: 下で立って端でしゃがむ・反応0.2秒
-  good: { pump: 'good', frac: 0.5, lag: 0.2, jit: 0.05, aim: 0.16, minAmp: 0.4, tuck: true },
-  // 人の速さ（初めて数分の人）: 反応0.35秒・ぶれ大きめ・丸まりは使わない
-  human: { pump: 'good', frac: 0.5, lag: 0.35, jit: 0.1, aim: 0.18, minAmp: 0.4 },
-  // 下手: でたらめに立ったりしゃがんだり・届きそうなら離す
-  bad: { pump: 'bad', lag: 0.35, jit: 0.1, aim: 0.18, minAmp: 0.4 },
-  // 逆に漕ぐ（端で立つ）
-  inv: { pump: 'inv', frac: 0.5, lag: 0.3, jit: 0.08, aim: 0.18, minAmp: 0.4 },
-  // 漕がない
-  none: { pump: 'none', lag: 0.3, jit: 0.08, aim: 0.18, minAmp: 0.4 },
+  // 上手い人: 揺れの向きに0.2秒で気づく・空中ですぐ寄せる
+  good: { pump: 'good', lag: 0.2, jit: 0.05, air: true, airLag: 0.12 },
+  // 人の速さ（初めて数分の人）: 0.35秒遅れ・ぶれ大きめ・空中で寄せるのも遅い
+  human: { pump: 'good', lag: 0.35, jit: 0.12, air: true, airLag: 0.35 },
+  // 空中で寄せない人（漕ぐだけ）
+  noair: { pump: 'good', lag: 0.35, jit: 0.12 },
+  // 次の鎖の向きを押しっぱなし
+  hold: { pump: 'hold', lag: 0.3 },
+  // でたらめに押す
+  bad: { pump: 'bad', lag: 0.35, jit: 0.1 },
+  // 逆に押す
+  inv: { pump: 'inv', lag: 0.3, jit: 0.08 },
+  // 押さない
   idle: { idle: true },
 }
 const API = { makeBot, BOTS }

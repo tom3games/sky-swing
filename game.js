@@ -1,4 +1,4 @@
-// 天空ブランコ（sky-swing）。体ボタンで漕いで、手ボタンを離して飛び、次のブランコの鎖をつかんで登る
+// 天空ブランコ（sky-swing）。左右のボタンを揺れに合わせて押して漕ぎ、届いたら勝手に飛び移って登る（v2）
 // 物理は phys.js（固定60Hz）。ここは入力・演出・描画・画面。仕様の正本: ~/Desktop/claudecode/ideas/sky-swing.md
 ;(() => {
 'use strict'
@@ -22,7 +22,7 @@ const N = (n, f) => Array.from({ length: n }, (_, i) => f(i + 1))
 Snd.def({
   creak: N(3, i => `snd/creak${i}.mp3`), clank: N(3, i => `snd/clank${i}.mp3`), swish: N(3, i => `snd/swish${i}.mp3`),
   thud: N(3, i => `snd/thud${i}.mp3`), splat: ['snd/splat1.mp3', 'snd/splat2.mp3'], fall: ['snd/fall1.mp3', 'snd/fall2.mp3'], splash: ['snd/splash1.mp3', 'snd/splash2.mp3'],
-  giggle: 'snd/giggle.mp3', flap: 'snd/flap.mp3', whistle: 'snd/whistle.mp3', click: 'snd/click.mp3',
+  flap: 'snd/flap.mp3', whistle: 'snd/whistle.mp3', click: 'snd/click.mp3',
   jgood: 'snd/jgood.mp3', jmeh: 'snd/jmeh.mp3', jrare: 'snd/jrare.mp3', jover: 'snd/jover.mp3',
 })
 const LOOPS = { bgmT: 'snd/bgm_title.mp3', bgm: 'snd/bgm_play.mp3', park: 'snd/amb_park.mp3', wind: 'snd/amb_wind.mp3' }
@@ -46,32 +46,34 @@ function resize() {
   sizeTitleArt()
 }
 addEventListener('resize', () => { resize(); if (G.scene === 'end') drawRes() })
-const padTop = () => { const p = $('#pBody').getBoundingClientRect(); return p.height ? p.top - cv.getBoundingClientRect().top - 24 : H - 150 }
+const padTop = () => { const p = $('#pL').getBoundingClientRect(); return p.height ? p.top - cv.getBoundingClientRect().top - 24 : H - 150 }
 
 // ---- 状態 ----
 let w = PH.makeWorld(1)
 const G = window.__ssG = {
   scene: 'title', paused: false, cam: { x: 0, y: 3, s: 60 }, fx: [], lines: [], shake: 0, flash: 0, hitstop: 0, slowT: 0, slowOnce: false,
   bub: null, bubNext: 0, popUntil: 0, amp: 0, curMax: 0, lastSgn: 0, face: 1, tutOn: false, tutStep: '', tutDoneT: 0, selfBest: 0,
-  prev: null, alpha: 1, bot: null, inp: { body: false, hand: false }, shownBest: 0, mile: 0, endAt: 0, ended: false, warned: false,
+  prev: null, alpha: 1, bot: null, inp: { L: false, R: false }, shownBest: 0, mile: 0, endAt: 0, ended: false, warned: false,
   saidStart: false, flipsShown: 0, nPigeon: 0, flyBirds: [], lastLand: null, result: null, demo: false, seed: 1,
 }
 const INK = '#1f2433'
 
-// ---- 入力（2つの座面ボタン・F/J） ----
-const pads = { body: $('#pBody'), hand: $('#pHand') }
-const held = { body: new Set(), hand: new Set() }
+// ---- 入力（左右2つの座面ボタン・← →。A/D と F/J でも） ----
+const pads = { L: $('#pL'), R: $('#pR') }
+const held = { L: new Set(), R: new Set() }
+const PADK = ['L', 'R']
 function setPad(k) { const v = held[k].size > 0; G.inp[k] = v; pads[k].classList.toggle('on', v) }
-for (const k of ['body', 'hand']) {
+for (const k of PADK) {
   const el = pads[k]
   el.addEventListener('pointerdown', e => { e.preventDefault(); Snd.init(); held[k].add(e.pointerId); try { el.setPointerCapture(e.pointerId) } catch (er) {} setPad(k) })
   const up = e => { held[k].delete(e.pointerId); setPad(k) }
   el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up); el.addEventListener('lostpointercapture', up)
 }
-const KEYS = { f: 'body', j: 'hand' }
+const KEYS = { arrowleft: 'L', arrowright: 'R', a: 'L', d: 'R', f: 'L', j: 'R' }
 addEventListener('keydown', e => { const k = KEYS[(e.key || '').toLowerCase()]; if (!k || G.scene !== 'play') return; e.preventDefault(); Snd.init(); held[k].add('key'); setPad(k) })
 addEventListener('keyup', e => { const k = KEYS[(e.key || '').toLowerCase()]; if (!k) return; held[k].delete('key'); setPad(k) })
-addEventListener('blur', () => { for (const k of ['body', 'hand']) { held[k].clear(); setPad(k) } })
+addEventListener('blur', () => { for (const k of PADK) { held[k].clear(); setPad(k) } })
+const clearPads = () => { for (const k of PADK) { held[k].clear(); setPad(k) } }
 
 // ---- 1コマ（固定60Hz） ----
 function snap() {
@@ -111,10 +113,10 @@ function nearSlow() {
   if (w.phase !== 'air' || G.slowOnce) return
   const path = []
   let x = m.x, y = m.y, vx = m.vx, vy = m.vy, phi = m.phi
-  const arm = P.armExt + (P.armTuck - P.armExt) * m.tk
-  for (let i = 0; i < 20; i++) { vy -= PH.GR * DT; x += vx * DT; y += vy * DT; phi += m.spin * DT; path.push({ x: x - Math.sin(phi) * arm, y: y + Math.cos(phi) * arm, cx: x, cy: y, phi }) }
+  const arm = P.armExt
+  for (let i = 0; i < 20; i++) { vy -= PH.GR * DT; x += vx * DT; y += vy * DT; path.push({ x: x - Math.sin(phi) * arm, y: y + Math.cos(phi) * arm, cx: x, cy: y, phi }) }
   for (const s of w.swings) {
-    if (s.i === m.relFrom || Math.abs(s.x - m.x) > 4 || Math.abs(s.y - m.y) > 5) continue
+    if (s.i <= m.relFrom || Math.abs(s.x - m.x) > 4 || Math.abs(s.y - m.y) > 5) continue
     const h = PH.predictHit(w, s.i, path)
     if (h.d > P.reach && h.d < P.reach + 0.28) { G.slowOnce = true; G.slowT = 0.55; return }
   }
@@ -147,17 +149,13 @@ function onEvent(e) {
         else if (e.d < 0.08) pop(t.nice, 'good')
         const ml = D.MILES[G.mile]; if (ml && e.h >= ml.y) { G.mile++; if (G.popUntil < realT) pop(ml[lang], 'good') }
         G.shownBest = Math.max(G.shownBest, e.h)
-        if (e.first) { kidSay(t.kid.grab); if (G.tutOn) { G.tutStep = 'done'; G.tutDoneT = realT + 2.4; try { localStorage.setItem('ss_tut', '1') } catch (er) {} } }
+        if (e.first) { kidSay(t.kid.grab); if (G.tutOn) { G.tutStep = 'done'; G.tutDoneT = realT + 2.4; try { localStorage.setItem('ss_tut2', '1') } catch (er) {} } }
         else if (!e.pigeon) bandSay(s)
       }
       bumpHud()
       break
     }
     case 'near': if (e.cm <= 45) pop(t.near(e.cm), 'bad'); break
-    case 'upside': pop(t.upside, 'bad'); break
-    case 'slip': pop(t.slip, 'bad'); sfx('clank', { vol: 0.4, rate: 1.3 }); break
-    case 'loop': pop(t.loop, 'good'); sfx('swish', { vol: 1, rate: 0.7 }); kidSay(t.kid.loop); break
-    case 'flip': if (G.flipsShown++ < 3) pop(t.flip, 'good'); break
     case 'fallStart': sfx('swish', { vol: 1, rate: 0.6 }); if (FR() < 0.5) saySelf(pick([t.me[1], t.me[0]])); break
     case 'land': {
       const k = e.pose
@@ -167,7 +165,6 @@ function onEvent(e) {
       G.shake = Math.max(G.shake, e.h > 8 ? 1 : 0.55)
       G.lastLand = { ...e, x: m.x }
       if (e.from > 0) pop(D.FALLS[k][lang], k === 'stand' ? 'good' : 'bad')
-      setTimeout(() => sfx('giggle', { vol: 0.35 }), 250)
       const kk = k === 'sandHead' || k === 'sandSit' ? 'sand' : k
       if (t.kid[kk]) kidSay(t.kid[kk], true)
       break
@@ -527,7 +524,7 @@ function poseNow() {
     const s = w.swings[m.si]
     const th = pv && pv.mode === 'swing' && pv.si === m.si ? lerpA(pv.th, m.th, al) : m.th
     const L = pv && pv.mode === 'swing' && pv.si === m.si ? lerp(pv.L, m.L, al) : m.L
-    return poseSwing(s, th, L, G.face)
+    return poseSwing(s, th, L, G.face, m.push || 0)
   }
   if (mode === 'down') return poseDown(m)
   const same = pv && pv.mode === mode
@@ -535,13 +532,15 @@ function poseNow() {
   const phi = same ? lerpA(pv.phi, m.phi, al) : m.phi, tk = same ? lerp(pv.tk, m.tk, al) : m.tk
   return poseAir(x, y, phi, tk, G.face, w.phase === 'fall')
 }
-function poseSwing(s, th, L, face) {
+function poseSwing(s, th, L, face, push = 0) {
   const sx = s.x + s.C * Math.sin(th), sy = s.y - s.C * Math.cos(th)
   const ux = -Math.sin(th), uy = Math.cos(th), fx = Math.cos(th) * face, fy = Math.sin(th) * face
-  const q = clamp((s.C - L - P.squat) / (P.stand - P.squat), 0, 1)
+  const q = 0.35   // v2: 立つ・しゃがむは無い。座面の上で軽くかがんだまま
+  // 押している向きへ体を傾ける（右へ押すなら右へ）
+  const kick = push * face
   const feet = [sx + ux * 0.04, sy + uy * 0.04]
   const hipH = 0.5 + 0.38 * q
-  const lean = 0.28 * (1 - q)
+  const lean = 0.1 + 0.32 * kick
   const hip = [feet[0] + ux * hipH - fx * 0.12 * (1 - q), feet[1] + uy * hipH - fy * 0.12 * (1 - q)]
   const knee = twoBone(hip[0], hip[1], feet[0], feet[1], 0.46, 0.46, fx, fy)
   const tx = ux + fx * lean, ty = uy + fy * lean, tl = Math.hypot(tx, ty)
@@ -637,8 +636,8 @@ function drawPreview(c) {
   const m = w.me
   if (m.mode !== 'swing' || m.si !== 0 || w.phase !== 'swing') return
   const path = PH.predict(w, 1.3)
-  const hit = PH.predictHit(w, 1, path)
-  const ok = hit.d < P.reach && hit.off < P.upTol
+  const hit = PH.predictHit(w, 1, path, true)
+  const ok = hit.d < P.reach
   c.fillStyle = ok ? 'rgba(255,230,90,.95)' : 'rgba(255,255,255,.75)'
   for (let k = 3; k < path.length; k += 4) {
     if (ok && k > hit.k + 2) break
@@ -707,21 +706,19 @@ function tutUpdate() {
   if (G.tutStep === 'done') { step = realT < G.tutDoneT ? 'done' : 'off'; if (step === 'off') { G.tutOn = false; G.tutStep = '' } }
   else if (G.tutOn) {
     if (w.phase === 'ready') step = 'hold'
-    else if (w.phase === 'swing' && m.si === 0) step = Math.max(G.amp, G.curMax) < 0.95 ? 'pump' : 'rel'
+    else if (w.phase === 'swing' && m.si === 0) step = 'pump'
     else if (w.phase === 'air') step = 'air'
     else step = G.lastStep || ''
   }
   G.lastStep = step
   const k = fineP() && t[step + 'K'] ? t[step + 'K'] : t[step]
   if (step && step !== 'off' && k) { el.hidden = false; $('#tutT').textContent = k } else el.hidden = true
-  // ボタンを光らせる
-  const A = Math.max(G.amp, G.curMax, 0.25)
-  const bodyHint = step === 'pump', handHint = step === 'hold' || step === 'air' || step === 'rel'
-  pads.body.classList.toggle('hintOn', bodyHint && Math.abs(m.th) < A * 0.5 && m.mode === 'swing')
-  pads.body.classList.toggle('hint', false)
-  pads.hand.classList.toggle('hint', handHint && step !== 'rel')
-  pads.hand.classList.toggle('hintOn', step === 'rel' && !!G.previewOk)
-  if (!step || step === 'off' || step === 'done') { pads.body.classList.remove('hintOn'); pads.hand.classList.remove('hint', 'hintOn') }
+  // 練習のブランコ（0）では、いま揺れている向きのボタンを光らせる。漕ぎ出す前は両方を点滅
+  let lit = 0
+  if (m.mode === 'swing' && m.si === 0 && w.phase === 'swing') { const om = m.h / (m.L * m.L); lit = Math.abs(om) > 0.15 ? Math.sign(om) : 0 }
+  pads.L.classList.toggle('hintOn', lit < 0); pads.R.classList.toggle('hintOn', lit > 0)
+  const ready = w.phase === 'ready' && w.me.si === 0 && w.bestIdx === 0
+  pads.L.classList.toggle('hint', ready); pads.R.classList.toggle('hint', ready)
 }
 
 // ---- 時計（固定60Hz・performance.now で数える） ----
@@ -771,8 +768,8 @@ function drawTitleArt() {
   const keep = { w, W, H, cam: { ...G.cam }, cy: G.cy, prev: G.prev, alpha: G.alpha, face: G.face, sx: G.shx, sy: G.shy, best: G.selfBest }
   w = tWorld; W = tW; H = tH
   const s0 = tWorld.swings[0], tt = realT
-  const th = 1.05 * Math.sin(tt * 2.15), stand = Math.abs(th) < 0.5
-  tWorld.me.mode = 'swing'; tWorld.me.si = 0; tWorld.me.th = th; tWorld.me.L = s0.C - (stand ? P.stand : P.squat) * 0.98; s0.th = th
+  const th = 1.05 * Math.sin(tt * 2.15)
+  tWorld.me.mode = 'swing'; tWorld.me.si = 0; tWorld.me.th = th; tWorld.me.L = s0.C - P.squat; s0.th = th; tWorld.me.push = Math.sign(Math.cos(tt * 2.15))
   for (const s of tWorld.swings) if (s.i > 0) s.th = 0.15 * Math.sin(tt * 1.7 + s.i)
   G.prev = null; G.alpha = 1; G.face = 1; G.shx = 0; G.shy = 0; G.selfBest = 0
   G.cam = { x: 0.9, y: 3.4, s: Math.min(W / 6.6, H / 11) }; G.cy = H * 0.5
@@ -791,7 +788,7 @@ function applyLang() {
   $('#loadTxt').textContent = t.loading; $('#bAgain').textContent = t.again; $('#bSave').textContent = t.save; $('#bPost').textContent = t.post
   $('#howH').textContent = t.howH; $('#howBody').innerHTML = t.howList.map(s => `<li>${s}</li>`).join(''); $('#howClose').textContent = t.close
   $('#howCred').textContent = lang === 'ja' ? '音: Kenney / rubberduck / artisticdude / Of Far Different Nature / Almitory / Joseph Sardin / SpliceSound ほか（CC0）' : 'Sound: Kenney / rubberduck / artisticdude / Of Far Different Nature / Almitory / Joseph Sardin / SpliceSound and others (CC0)'
-  $('#pBodyT').textContent = t.bBody; $('#pHandT').textContent = t.bHand
+  $('#pLT').textContent = t.bL; $('#pRT').textContent = t.bR
   const fine = fineP(); for (const k of document.querySelectorAll('.pad .k')) k.hidden = !fine
   const b = readBest()
   $('#tBest').textContent = b ? t.best(b.toFixed(1)) : ''
@@ -812,13 +809,13 @@ document.addEventListener('pointerdown', () => { if (G.scene === 'title' && !loo
 function startGame(seed) {
   G.seed = seed != null ? seed : ((Date.now() % 100000) + 1)
   w = PH.makeWorld(G.seed)
-  let tut = false; try { tut = localStorage.getItem('ss_tut') !== '1' } catch (e) { tut = true }
+  let tut = false; try { tut = localStorage.getItem('ss_tut2') !== '1' } catch (e) { tut = true }
   Object.assign(G, { scene: 'play', fx: [], lines: [], shake: 0, flash: 0, hitstop: 0, slowT: 0, slowOnce: false, bub: null, bubNext: 0, popUntil: 0, amp: 0, curMax: 0, lastSgn: 0, face: 1,
     tutOn: tut, tutStep: '', prev: null, alpha: 1, shownBest: 0, mile: 0, ended: false, endAt: 0, warned: false, manager: null, saidStart: false, flipsShown: 0, flyBirds: [], shoeFly: null, lastLand: null, result: null, selfBest: readBest() })
   show('#vPlay'); resize()
   G.cam = { x: 1.2, y: 2.6, s: Math.min(W / 7.2, padTop() / 9.5) }
   acc = 0; lastT = performance.now()
-  for (const k of ['body', 'hand']) { held[k].clear(); setPad(k) }
+  clearPads()
   drawShoes(); applyLang(); $('#pop').className = ''
   allLoopsOff(); loop('bgm', 0.2); loop('park', 0.3); loop('wind', 0.0001)
   window.TM && TM.start()
@@ -896,7 +893,7 @@ function photo(c, x, y, pw, ph) {
   G.cam = { x: s.x + 0.3, y: s.y - s.C * 0.55, s: pw / 4.4 }; G.cy = ph * 0.5
   const th0 = s.th
   s.th = 0.55
-  Object.assign(w.me, { mode: 'swing', si: s.i, th: 0.55, L: s.C - P.stand })
+  Object.assign(w.me, { mode: 'swing', si: s.i, th: 0.55, L: s.C - P.squat, push: 1 })
   try { render(c, pw, ph, { noPreview: true, noSpeed: true, tf: c.getTransform() }) } catch (e) { console.warn(e) }
   s.th = th0
   c.restore()
@@ -913,7 +910,7 @@ function drawRes() { const el = $('#res'); drawCard(el.getContext('2d'), el.widt
 function showEnd() {
   G.scene = 'end'; show('#vEnd')
   allLoopsOff(); loop('bgmT', 0.22)
-  for (const k of ['body', 'hand']) { held[k].clear(); setPad(k) }
+  clearPads()
   const h = w.best, b = readBest()
   if (h > b) { try { localStorage.setItem('ss_best', String(h)) } catch (e) {} }
   const wf = worstFall()
@@ -957,13 +954,13 @@ requestAnimationFrame(frame)
 boot()
 
 // ---- ?demo=1: 実機・シミュレーターでの通し確認。bot の入力を本物の pointer イベントで座面ボタンへ送る（鳴らさない） ----
-const demoDown = { body: false, hand: false }
+const demoDown = { L: false, R: false }
 function syncDemoPads(inp) {
-  for (const k of ['body', 'hand']) {
+  for (const k of PADK) {
     if (!!inp[k] === demoDown[k]) continue
     demoDown[k] = !!inp[k]
     const r = pads[k].getBoundingClientRect()
-    pads[k].dispatchEvent(new PointerEvent(inp[k] ? 'pointerdown' : 'pointerup', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, pointerId: k === 'body' ? 31 : 32, pointerType: 'touch' }))
+    pads[k].dispatchEvent(new PointerEvent(inp[k] ? 'pointerdown' : 'pointerup', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, pointerId: k === 'L' ? 31 : 32, pointerType: 'touch' }))
   }
 }
 if (/[?&]demo=1/.test(location.search)) {
@@ -1000,7 +997,7 @@ window.ss = {
     setBot(name, botSeed = 7) { if (!name) { G.bot = null; return } let rs = botSeed; const Rb = () => (rs = rs * 16807 % 2147483647) / 2147483647; G.bot = SS_BOTS.makeBot(PH, SS_BOTS.BOTS[name], Rb) },
     finish() { w.misses = 1; w.falls.push({ kind: 'sand', pose: 'sandHead', h: Math.max(3, w.best + 2), from: 1 }); w.phase = 'over'; w.why = 'shoes'; G.ended = true; G.endAt = w.t; showEnd() },
     // 台本用: ブランコ j に乗せる（勢い om）
-    put(j, th = 0.5, om = 0) { if (w.swings.length < j + 8) { w.bestIdx = Math.max(w.bestIdx, j); w.phase = 'swing'; w.me.mode = 'swing'; w.me.si = Math.max(0, w.me.si); PH.step(w, { body: false, hand: true }); w.ev.length = 0 } const s = w.swings[j]; Object.assign(w.me, { mode: 'swing', si: j, th, L: s.C - P.squat, h: om * (s.C - P.squat) ** 2, tk: 0 }); w.phase = 'swing'; s.th = th; const L = w.me.L; w.me.x = s.x + L * Math.sin(th); w.me.y = s.y - L * Math.cos(th); w.bestIdx = Math.max(w.bestIdx, j); w.best = Math.max(w.best, +(s.y - s.C - 0.4).toFixed(2)); G.inp.hand = true; G.prev = null },
+    put(j, th = 0.5, om = 0) { if (w.swings.length < j + 8) { w.bestIdx = Math.max(w.bestIdx, j); w.phase = 'swing'; w.me.mode = 'swing'; w.me.si = Math.max(0, w.me.si); PH.step(w, {}); w.ev.length = 0 } const s = w.swings[j]; Object.assign(w.me, { mode: 'swing', si: j, th, L: s.C - P.squat, h: om * (s.C - P.squat) ** 2, tk: 0 }); w.phase = 'swing'; s.th = th; const L = w.me.L; w.me.x = s.x + L * Math.sin(th); w.me.y = s.y - L * Math.cos(th); w.bestIdx = Math.max(w.bestIdx, j); w.best = Math.max(w.best, +(s.y - s.C - 0.4).toFixed(2)); w.me.grabT = w.t; G.prev = null },
     air(x, y, vx, vy, phi = 0, spin = 0, tk = 0) { Object.assign(w.me, { mode: 'air', si: -1, x, y, vx, vy, phi, spin, Lb: spin, tk, relT: w.t - 1, relFrom: Math.max(0, w.me.si) }); w.phase = 'air'; G.prev = null },
   },
 }

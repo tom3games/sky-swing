@@ -3,7 +3,7 @@ import { MUTE_LAUNCH, muteContext } from './mute.mjs'
 // 天空ブランコの検証。node verify.mjs（空きポートは VPORT で変えられる）
 import { chromium, webkit } from 'playwright'
 import { spawn } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, existsSync } from 'node:fs'
 const ROOT = import.meta.dirname
 mkdirSync(ROOT + '/shots', { recursive: true })
 const PORT = +(process.env.VPORT || 6595)
@@ -59,7 +59,7 @@ await t('ブラウザの拡大が起きない（viewport・ピンチ・Ctrl+ホ�
     const g = new Event('gesturestart', { cancelable: true }); document.dispatchEvent(g)
     const w = new WheelEvent('wheel', { ctrlKey: true, deltaY: -10, bubbles: true, cancelable: true }); window.dispatchEvent(w)
     const k = new KeyboardEvent('keydown', { key: '+', ctrlKey: true, bubbles: true, cancelable: true }); window.dispatchEvent(k)
-    return { vp, gesture: g.defaultPrevented, wheel: w.defaultPrevented, key: k.defaultPrevented, ta: getComputedStyle(document.documentElement).touchAction, us: getComputedStyle(document.body).userSelect, pad: getComputedStyle(document.querySelector('#pHand')).touchAction }
+    return { vp, gesture: g.defaultPrevented, wheel: w.defaultPrevented, key: k.defaultPrevented, ta: getComputedStyle(document.documentElement).touchAction, us: getComputedStyle(document.body).userSelect, pad: getComputedStyle(document.querySelector('#pR')).touchAction }
   })
   expect(/user-scalable=no/.test(r.vp) && r.gesture && r.wheel && r.key && r.ta === 'manipulation' && r.us === 'none' && r.pad === 'none', JSON.stringify(r)); return r
 })
@@ -81,53 +81,58 @@ await t('はじめると遊ぶ画面・音を鳴らす呼び出しがある・�
   const r = await p.evaluate(() => ({ scene: ss.state().scene, loops: Snd.played['loop:bgm'] || 0, click: Snd.played.click || 0, mute: window.__muteOk() }))
   expect(r.scene === 'play' && r.loops >= 1 && r.click >= 1 && r.mute, JSON.stringify(r)); return r
 })
-await t('はじめての人にチュートリアルが出る（つかむ → 漕ぐ）', async () => {
-  const a = await p.evaluate(() => { ss.dbg.pause(); ss.start(3); ss.dbg.pause(); ss.dbg.step(2); return ss.state().tut })
-  expect(/つかむ/.test(a), a); return a
+await t('はじめての人にチュートリアルが出る（左か右で漕ぎ出す）・両方のボタンが点滅', async () => {
+  const a = await p.evaluate(() => { ss.dbg.pause(); ss.start(3); ss.dbg.pause(); ss.dbg.step(2); return { tut: ss.state().tut, hint: ['#pL', '#pR'].every(q => document.querySelector(q).classList.contains('hint')) } })
+  expect(/漕ぎ出す/.test(a.tut) && a.hint, JSON.stringify(a)); return a
 })
-await t('本物の指で: 手の座面を押すとつかむ・離すと飛ぶ（ブランコ0）', async () => {
-  const h = await p.evaluate(() => ss.padXY('hand'))
+await t('本物の指で: 右の座面を押すと漕ぎ出し、揺れている向きのボタンが光る', async () => {
+  const h = await p.evaluate(() => ss.padXY('R'))
   await p.mouse.move(h.x, h.y); await p.mouse.down()
-  const a = await p.evaluate(() => { ss.dbg.tick(2); return ss.state() })
-  const pumpTxt = await p.evaluate(() => { ss.dbg.step(1); return ss.state().tut })
-  await p.evaluate(() => ss.dbg.tick(30))
+  const a = await p.evaluate(() => { ss.dbg.step(10); const om = ss.w().me.h / ss.w().me.L ** 2; return { phase: ss.state().phase, tut: ss.state().tut, om, litR: document.querySelector('#pR').classList.contains('hintOn'), litL: document.querySelector('#pL').classList.contains('hintOn'), on: document.querySelector('#pR').classList.contains('on') } })
   await p.mouse.up()
-  const b = await p.evaluate(() => { ss.dbg.tick(2); return ss.state() })
-  expect(a.phase === 'swing' && b.phase === 'air' && /立つ/.test(pumpTxt), JSON.stringify({ a: a.phase, b: b.phase, pumpTxt })); return { a: a.phase, b: b.phase, pumpTxt }
+  expect(a.phase === 'swing' && /揺れている向き/.test(a.tut) && a.om > 0 && a.litR && !a.litL && a.on, JSON.stringify(a)); return a
 })
-await t('本物の指で: 体の座面を押している間だけ立つ（重心が鎖の上に寄る）', async () => {
+// 本物のマウスで、揺れている向きの座面を押し続ける（反応 0.3 秒遅れ）
+const pumpByMouse = async (q, sec, keys = false) => {
+  const pts = await q.evaluate(() => ({ L: ss.padXY('L'), R: ss.padXY('R') }))
+  let cur = 0, hist = []
+  for (let f = 0; f < sec * 60; f += 3) {
+    const st = await q.evaluate(() => { ss.dbg.tick(3); const m = ss.w().me; return { om: m.mode === 'swing' ? m.h / (m.L * m.L) : 0, phase: ss.w().phase, idx: ss.w().bestIdx } })
+    hist.push(st); const seen = hist[Math.max(0, hist.length - 7)]
+    if (st.idx >= 1) break
+    const want = st.phase === 'ready' ? 1 : st.phase === 'swing' ? (Math.sign(seen.om) || 1) : 0
+    if (want !== cur) {
+      if (keys) { if (cur) await q.keyboard.up(cur > 0 ? 'ArrowRight' : 'ArrowLeft'); if (want) await q.keyboard.down(want > 0 ? 'ArrowRight' : 'ArrowLeft') }
+      else { if (cur) await q.mouse.up(); if (want) { const pt = want > 0 ? pts.R : pts.L; await q.mouse.move(pt.x, pt.y); await q.mouse.down() } }
+      cur = want
+    }
+  }
+  if (cur) { if (keys) await q.keyboard.up(cur > 0 ? 'ArrowRight' : 'ArrowLeft'); else await q.mouse.up() }
+  return q.evaluate(() => ({ idx: ss.w().bestIdx, t: +ss.w().t.toFixed(1), phase: ss.w().phase }))
+}
+await t('本物の指で: 揺れに合わせて左右を押すと大きくなり、届いたら勝手に次のブランコへ（20秒以内）', async () => {
   await p.evaluate(() => { ss.start(3); ss.dbg.pause() })
-  const h = await p.evaluate(() => ss.padXY('hand')), bd = await p.evaluate(() => ss.padXY('body'))
-  await p.mouse.move(h.x, h.y); await p.mouse.down()
-  const L0 = await p.evaluate(() => { ss.dbg.tick(20); return ss.w().me.L })
-  // 2本目の指は touch で（マウスは1本しか押せないので pointer イベントを座面に送る）
-  await p.evaluate(({ x, y }) => { const el = document.querySelector('#pBody'); el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerId: 77, pointerType: 'touch' })) }, bd)
-  const L1 = await p.evaluate(() => { ss.dbg.tick(20); return { L: ss.w().me.L, on: document.querySelector('#pBody').classList.contains('on') } })
-  await p.evaluate(({ x, y }) => { document.querySelector('#pBody').dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerId: 77, pointerType: 'touch' })) }, bd)
-  const L2 = await p.evaluate(() => { ss.dbg.tick(20); return ss.w().me.L })
-  await p.mouse.up()
-  expect(L1.L < L0 - 0.25 && L1.on && L2 > L1.L + 0.25, JSON.stringify({ L0, L1, L2 })); return { L0: +L0.toFixed(2), stand: +L1.L.toFixed(2), back: +L2.toFixed(2) }
+  const r = await pumpByMouse(p, 20)
+  expect(r.idx >= 1 && r.t < 20, JSON.stringify(r)); return r
 })
-await t('キーボード: J でつかむ・F で立つ', async () => {
-  await p.evaluate(() => { ss.start(3); ss.dbg.pause() })
-  await p.keyboard.down('j'); const a = await p.evaluate(() => { ss.dbg.tick(2); return ss.state().phase })
-  await p.keyboard.down('f'); const L = await p.evaluate(() => { ss.dbg.tick(20); return ss.w().me.L })
-  await p.keyboard.up('f'); await p.keyboard.up('j'); const b = await p.evaluate(() => { ss.dbg.tick(2); return ss.state().phase })
-  expect(a === 'swing' && L < 1.3 && b === 'air', JSON.stringify({ a, L, b })); return { a, b }
+await t('キーボード: ← → で同じように漕いで飛び移れる', async () => {
+  await p.evaluate(() => { ss.start(4); ss.dbg.pause() })
+  const r = await pumpByMouse(p, 20, true)
+  expect(r.idx >= 1 && r.t < 20, JSON.stringify(r)); return r
 })
-await t('下で立って端でしゃがむと振れが大きくなる・逆に漕ぐと小さくなる（15秒）', async () => {
+await t('揺れている向きに押すと振れが大きくなる・逆に押す／押しっぱなし／押さないと大きくならない（15秒・飛ばない設定で）', async () => {
   const r = await p.evaluate(() => {
-    const out = {}
-    for (const name of ['good', 'inv', 'none']) {
+    const out = {}, keep = ss.PH.P.aim; ss.PH.P.aim = -1
+    for (const name of ['good', 'inv', 'hold', 'bad', 'idle']) {
       ss.start(9); ss.dbg.pause(); ss.dbg.setBot(name, 3)
       const PH = ss.PH; let mx = 0
-      for (let i = 0; i < 60 * 15; i++) { const w = ss.w(); const o = ss.G.bot(w); o.hand = true; PH.step(w, o); w.ev.length = 0; if (i > 60 * 10) mx = Math.max(mx, Math.abs(w.me.th)) }
+      for (let i = 0; i < 60 * 15; i++) { const w = ss.w(); PH.step(w, ss.G.bot(w)); w.ev.length = 0; if (i > 60 * 10) mx = Math.max(mx, Math.abs(w.me.th)) }
       out[name] = +mx.toFixed(2)
     }
-    ss.dbg.setBot(null)
+    ss.PH.P.aim = keep; ss.dbg.setBot(null)
     return out
   })
-  expect(r.good > 1.2 && r.inv < 0.45 && r.none < 0.45, JSON.stringify(r)); return r
+  expect(r.good > 1.2 && r.inv < 0.45 && r.hold < 0.6 && r.bad < r.good * 0.7 && r.idle < 0.45, JSON.stringify(r)); return r
 })
 await t('何もしないと最低の結果（25秒で閉園・0m・ただ座っていた大人）', async () => {
   const rs = await p.evaluate(() => { const o = []; for (const s of [1, 2, 3]) { const r = ss.runBot('idle', 120, s); o.push({ ...r, rank: ss.rankOf(r.best).ja }) } return o })
@@ -151,13 +156,13 @@ await t('実時間2秒あたりのコマ数が画面の速さで変わらない�
   expect(Math.abs(r[144] - 120) <= 1 && Math.abs(r[60] - 120) <= 1 && Math.abs(r[30] - 120) <= 1, JSON.stringify(r)); return r
 })
 await t('上手い入力と下手な入力で差が出る（各4回の高さ）', async () => {
-  const r = await p.evaluate(() => { const o = {}; for (const n of ['good', 'human', 'bad', 'inv']) { const a = []; for (const s of [3, 5, 7, 11]) a.push(ss.runBot(n, 300, s, s * 3).best); o[n] = a } return o })
+  const r = await p.evaluate(() => { const o = {}; for (const n of ['good', 'human', 'bad', 'inv', 'hold']) { const a = []; for (const s of [3, 5, 7, 11]) a.push(ss.runBot(n, 300, s, s * 3).best); o[n] = a } return o })
   const med = a => a.slice().sort((x, y) => x - y)[2]
-  expect(med(r.good) > 8 && med(r.good) > med(r.bad) + 5 && med(r.inv) === 0 && med(r.human) > med(r.bad), JSON.stringify(r)); return r
+  expect(med(r.good) > 15 && med(r.human) > med(r.bad) * 2 && med(r.inv) === 0 && med(r.hold) === 0, JSON.stringify(r)); return r
 })
-await t('人の速さの bot（反応0.35秒）が2分以内に最初のブランコへ飛び移れる（6回中5回以上）', async () => {
-  const r = await p.evaluate(() => { const o = []; for (const s of [1, 2, 3, 4, 5, 6]) { ss.runBot('human', 120, s, s * 13); o.push(ss.w().bestIdx >= 1 || ss.w().grabs > 0) } return o })
-  expect(r.filter(Boolean).length >= 5, JSON.stringify(r)); return r.filter(Boolean).length
+await t('人の速さの bot（反応0.35秒）が全員15秒以内に最初のブランコへ・5本目まで落ちずに行ける（12回）', async () => {
+  const r = await p.evaluate(() => { const o = []; for (let s = 1; s <= 12; s++) { ss.start(s); ss.dbg.pause(); ss.dbg.setBot('human', s * 13); let first = -1; while (ss.w().phase !== 'over' && ss.w().t < 120 && ss.w().bestIdx < 5) { ss.dbg.tick(1); if (first < 0 && ss.w().bestIdx >= 1) first = ss.w().t } o.push({ first: +first.toFixed(1), idx: ss.w().bestIdx, falls: ss.w().falls.length }) } ss.dbg.setBot(null); return o })
+  expect(r.every(x => x.first > 0 && x.first < 15 && x.idx >= 5 && x.falls === 0), JSON.stringify(r)); return 'first ' + r.map(x => x.first).join(',')
 })
 await t('速く飛んでも鎖をすり抜けない（前のコマとの線分で判定）', async () => {
   const r = await p.evaluate(() => {
@@ -166,22 +171,19 @@ await t('速く飛んでも鎖をすり抜けない（前のコマとの線分�
     // 1コマで 0.6m 進む速さで、鎖の真横を通す
     const y = s2.y - s2.C * 0.5 - 0.92
     ss.dbg.air(s2.x - 0.35 * Math.sign(s2.x - w.swings[1].x), y, 36 * Math.sign(s2.x - w.swings[1].x), 0, 0, 0, 0)
-    ss.G.inp.hand = true
-    const keep = ss.PH.P.slipOm; ss.PH.P.slipOm = 1e9   // 速すぎて手がすべる判定は外して、当たり判定だけを見る
     const m = ss.w().me; m.hx = m.x - Math.sin(m.phi) * 0.92; m.hy = m.y + Math.cos(m.phi) * 0.92
     for (let i = 0; i < 4 && ss.w().phase === 'air'; i++) ss.dbg.tick(1)
-    ss.PH.P.slipOm = keep
     return { phase: ss.w().phase, si: ss.w().me.si }
   })
   expect(r.phase === 'swing' && r.si === 2, JSON.stringify(r)); return r
 })
 await t('ブランコ0から落ちても靴は減らない・空中のブランコから落ちると靴が1つ飛んで乗り直す', async () => {
   const r = await p.evaluate(() => {
-    ss.start(5); ss.dbg.pause(); ss.G.inp.hand = false
+    ss.start(5); ss.dbg.pause()
     ss.dbg.air(0.5, 1.0, 1, 0, 0, 0, 0); ss.w().me.relFrom = 0
     for (let i = 0; i < 400 && ss.w().phase !== 'ready'; i++) ss.dbg.tick(1)
     const a = ss.state()
-    ss.dbg.put(3, 0.3, 0); ss.G.inp.hand = false; ss.dbg.tick(1)
+    ss.dbg.put(3, 0.3, 0); { const m = ss.w().me; ss.dbg.air(m.x, m.y, 0, 0) }
     for (let i = 0; i < 900 && ss.w().phase !== 'ready'; i++) ss.dbg.tick(1)
     const b = ss.state(), shoes = document.querySelectorAll('#hShoes svg.gone').length
     return { a: { misses: a.misses, si: a.si, phase: a.phase }, b: { misses: b.misses, si: b.si, phase: b.phase }, shoes, falls: ss.w().falls.length }
@@ -189,7 +191,7 @@ await t('ブランコ0から落ちても靴は減らない・空中のブラン�
   expect(r.a.misses === 0 && r.a.si === 0 && r.b.misses === 1 && r.b.si === 3 && r.b.phase === 'ready' && r.shoes === 1, JSON.stringify(r)); return r
 })
 await t('靴を2つなくすと、公園のお知らせの紙（記録・称号・落ち方）が出る', async () => {
-  await p.evaluate(() => { ss.start(5); ss.dbg.pause(); ss.dbg.put(6, 0.3, 0); ss.w().misses = 1; ss.G.inp.hand = false; for (let i = 0; i < 1500 && ss.G.scene === 'play'; i++) ss.dbg.tick(1) })
+  await p.evaluate(() => { ss.start(5); ss.dbg.pause(); ss.dbg.put(6, 0.3, 0); ss.w().misses = 1; { const m = ss.w().me; ss.dbg.air(m.x, m.y, 0, 0) } for (let i = 0; i < 1500 && ss.G.scene === 'play'; i++) ss.dbg.tick(1) })
   const r = await p.evaluate(() => ({ s: ss.state(), res: ss.result(), btn: document.querySelector('#bAgain').textContent, sup: !!document.querySelector('#tmSupport') }))
   const v = await variance(p, '#res')
   await p.screenshot({ path: `${ROOT}/shots/v-end.png` })
@@ -209,7 +211,7 @@ await t('最初のブランコをつかむとチュートリアルが終わり�
     ss.start(8); ss.dbg.pause(); ss.dbg.setBot('good', 3)
     for (let i = 0; i < 60 * 60 && ss.w().bestIdx < 1; i++) ss.dbg.tick(1)
     ss.dbg.setBot(null)
-    const a = { idx: ss.w().bestIdx, ls: localStorage.getItem('ss_tut') }
+    const a = { idx: ss.w().bestIdx, ls: localStorage.getItem('ss_tut2') }
     ss.start(8); ss.dbg.pause(); ss.dbg.step(2)
     return { ...a, after: ss.state().tut }
   })
@@ -237,10 +239,10 @@ await t('英語に切り替えると文言が英語・結果も英語', async ()
   await q.click('#bStart')
   await q.evaluate(() => { ss.dbg.pause(); ss.dbg.put(4, 0.3, 0); ss.dbg.finish() })
   await q.waitForTimeout(300)
-  const r = await q.evaluate(() => ({ rank: ss.result().rank, again: document.querySelector('#bAgain').textContent, pad: document.querySelector('#pHandT').textContent }))
+  const r = await q.evaluate(() => ({ rank: ss.result().rank, again: document.querySelector('#bAgain').textContent, pad: document.querySelector('#pRT').textContent }))
   await q.screenshot({ path: `${ROOT}/shots/v-end-en.png` })
   await q.close()
-  expect(a.h.includes('Sky') && a.b === 'Swing' && /grown-up|Level|swinger/.test(r.rank) && r.again === 'Again' && r.pad === 'Grab', JSON.stringify({ a, r })); return { a, r }
+  expect(a.h.includes('Sky') && a.b === 'Swing' && /grown-up|Level|swinger/.test(r.rank) && r.again === 'Again' && r.pad === 'Right', JSON.stringify({ a, r })); return { a, r }
 })
 await t('遊び方が開いて閉じる', async () => {
   const q = await open(browser)
@@ -251,9 +253,14 @@ await t('遊び方が開いて閉じる', async () => {
 await t('X のアプリ内ブラウザ（?inapp=x）: 座面ボタンが下の52pxに入らない', async () => {
   const q = await open(browser, {}, '?inapp=x')
   await q.click('#bStart')
-  const r = await q.evaluate(() => { const b = document.querySelector('#pHand').getBoundingClientRect(); return { bottom: Math.round(b.bottom), H: innerHeight } })
+  const r = await q.evaluate(() => { const b = document.querySelector('#pR').getBoundingClientRect(); return { bottom: Math.round(b.bottom), H: innerHeight } })
   await q.close()
   expect(r.bottom <= r.H - 52, JSON.stringify(r)); return r
+})
+await t('笑い声の効果音が無い（定義にもファイルにも・落ちても鳴らない）', async () => {
+  const file = existsSync(`${ROOT}/snd/giggle.mp3`)
+  const r = await p.evaluate(async () => { const src = await (await fetch('game.js')).text(); ss.start(5); ss.dbg.pause(); ss.dbg.put(3, 0.3, 0); { const m = ss.w().me; ss.dbg.air(m.x, m.y, 0, 0) } for (let i = 0; i < 400; i++) ss.dbg.tick(1); await new Promise(r => setTimeout(r, 400)); return { src: /giggle|laugh/i.test(src), played: Object.keys(Snd.played).filter(k => /giggle|laugh/i.test(k)) } })
+  expect(!r.src && !file && !r.played.length, JSON.stringify({ ...r, file })); return r
 })
 await t('全体でエラーなし', async () => { expect(p.errs.length === 0, p.errs.join('|')) })
 await p.close()
@@ -265,7 +272,7 @@ for (const [w, h, name] of SIZES) {
   await q.click('#bHow'); views.how = await fit(q); await q.click('#howClose')
   await q.click('#bStart'); await q.evaluate(() => { ss.dbg.pause(); ss.dbg.put(5, 0.6, 0); ss.dbg.step(30) })
   views.play = await fit(q); await q.screenshot({ path: `${ROOT}/shots/fit-${name}-play.png` })
-  const padsOk = await q.evaluate(() => { const a = document.querySelector('#pBody').getBoundingClientRect(), b = document.querySelector('#pHand').getBoundingClientRect(); return a.height >= 80 && b.height >= 80 && a.right <= b.left && b.right <= innerWidth })
+  const padsOk = await q.evaluate(() => { const a = document.querySelector('#pL').getBoundingClientRect(), b = document.querySelector('#pR').getBoundingClientRect(); return a.height >= 80 && b.height >= 80 && a.right <= b.left && b.right <= innerWidth })
   await q.evaluate(() => { ss.dbg.finish() })
   await q.waitForTimeout(600)
   views.end = await fit(q); await q.screenshot({ path: `${ROOT}/shots/fit-${name}-end.png` })
@@ -281,12 +288,12 @@ await t('WebKit: 2本指の touchmove を止める', async () => {
   const r = await wp.evaluate(() => { const e = new Event('touchmove', { cancelable: true, bubbles: true }); Object.defineProperty(e, 'touches', { value: [{}, {}] }); document.body.dispatchEvent(e); return e.defaultPrevented })
   expect(r, r)
 })
-await t('WebKit: タップで始め、手の座面のタップでつかんで離す・bot で結果まで・無音', async () => {
+await t('WebKit: タップで始め、右の座面のタップで漕ぎ出す・bot で結果まで・無音', async () => {
   await wp.tap('#bStart'); await wp.waitForTimeout(300)
   await wp.evaluate(() => ss.dbg.pause())
-  const h = await wp.evaluate(() => ss.padXY('hand'))
+  const h = await wp.evaluate(() => { window.__tapR = 0; document.querySelector('#pR').addEventListener('pointerdown', () => { if (ss.G.inp.R) window.__tapR = 1 }); return ss.padXY('R') })
   await wp.touchscreen.tap(h.x, h.y)
-  const tapped = await wp.evaluate(() => { ss.dbg.tick(3); return ss.w().grabs >= 0 && ss.w().tick > 0 && (ss.state().phase === 'air' || ss.state().phase === 'swing' || ss.state().phase === 'down' || ss.state().phase === 'ready') })
+  const tapped = await wp.evaluate(() => window.__tapR === 1)
   const r = await wp.evaluate(() => { const x = ss.runBot('good', 400, 6, 2); ss.dbg.tick(200); return { ...x, scene: ss.G.scene, mute: window.__muteOk() } })
   await wp.waitForTimeout(600); await wp.screenshot({ path: `${ROOT}/shots/v-webkit-end.png` })
   expect(tapped && r.scene === 'end' && r.best > 3 && r.mute, JSON.stringify(r)); return r
