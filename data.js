@@ -3,7 +3,7 @@ const SS_DATA = {
   // 結果の称号（高さ m のしきい値）
   RANKS: [
     { min: 0, ja: 'ただ座っていた大人', en: 'Just a grown-up, sitting' },
-    { min: 0.5, ja: '立ち漕ぎの大人', en: 'Standing-up swinger' },
+    { min: 0.5, ja: '本気で漕いだ大人', en: 'Grown-up who swung for real' },
     { min: 4.2, ja: '電柱に並んだ大人', en: 'Level with the power poles' },
     { min: 10, ja: 'クレーンに吊られた大人', en: 'Hanging off a crane' },
     { min: 18, ja: '鉄塔の大人', en: 'Pylon person' },
